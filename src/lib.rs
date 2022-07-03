@@ -3,10 +3,12 @@
 #[cfg(test)]
 mod tests;
 
-use pb::Proposal;
+use futures::future::join_all;
+use pb::{AcceptResponse, PrepareResponse, Proposal};
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::Mutex;
-use tonic::transport::Server;
+use tonic::transport::{Channel, Server};
+use tonic::Status;
 
 pub mod pb {
     tonic::include_proto!("paxos");
@@ -67,7 +69,8 @@ impl pb::paxos_server::Paxos for Acceptor {
 pub struct Paxos {
     acceptor_num: u32,
     acceptor_addresses: Vec<String>,
-    runtime: Runtime,
+    runtime: Option<Runtime>,
+    current_number: Mutex<i64>,
 }
 
 impl Paxos {
@@ -101,7 +104,158 @@ impl Paxos {
         Self {
             acceptor_num,
             acceptor_addresses,
-            runtime,
+            runtime: Some(runtime),
+            current_number: Mutex::new(0),
         }
+    }
+
+    pub async fn run_paxos(&self, value: String) -> Proposal {
+        let quorum = self.acceptor_num / 2 + 1;
+
+        loop {
+            let number = {
+                let mut current_number = self.current_number.lock().await;
+                *current_number += 1;
+                *current_number
+            };
+
+            let responses = self.phase1(number).await;
+
+            let mut oudate = false;
+            let mut address_indexes = Vec::new();
+            let mut highest_number = 0;
+            let mut highest_numbered_proposal = None;
+
+            responses
+                .iter()
+                .enumerate()
+                .for_each(|(index, response)| match response {
+                    Ok(response) => {
+                        if response.promise_number > number {
+                            oudate = true;
+                            return;
+                        }
+                        assert!(response.promise_number == number);
+
+                        address_indexes.push(index);
+
+                        if response.highest_numbered_proposal.is_none() {
+                            return;
+                        }
+
+                        let proposal = response.highest_numbered_proposal.clone().unwrap();
+                        if proposal.number > highest_number {
+                            highest_number = proposal.number;
+                            highest_numbered_proposal = Some(proposal);
+                        }
+                    }
+                    Err(_) => (),
+                });
+
+            if oudate {
+                continue;
+            }
+
+            if address_indexes.len() < quorum.try_into().unwrap() {
+                continue;
+            }
+
+            let mut proposal = Proposal {
+                number,
+                value: Default::default(),
+            };
+            proposal.value = if highest_numbered_proposal.is_none() {
+                value.clone()
+            } else {
+                highest_numbered_proposal.unwrap().value
+            };
+
+            let responses = self.phase2(proposal.clone(), address_indexes).await;
+
+            responses.iter().for_each(|response| match response {
+                Ok(response) => {
+                    if response.promise_number > number {
+                        oudate = true;
+                        return;
+                    }
+                    assert!(response.promise_number == number);
+                }
+                Err(_) => (),
+            });
+
+            if oudate {
+                continue;
+            }
+
+            return proposal;
+        }
+    }
+
+    async fn phase1(&self, number: i64) -> Vec<Result<PrepareResponse, Status>> {
+        let responses = join_all(self.acceptor_addresses.iter().map(|addr| async move {
+            let channel = Channel::from_shared(format!("http://{}", addr))
+                .unwrap()
+                .timeout(std::time::Duration::from_secs(5))
+                .connect()
+                .await
+                .unwrap();
+
+            let mut client = pb::paxos_client::PaxosClient::new(channel);
+
+            let request = pb::PrepareRequest { number };
+
+            match client.prepare(request).await {
+                Ok(response) => {
+                    println!("response: {:?}", response);
+                    Ok(response.into_inner())
+                }
+                Err(e) => Err(e),
+            }
+        }))
+        .await;
+
+        responses
+    }
+
+    async fn phase2(
+        &self,
+        proposal: Proposal,
+        address_indexes: Vec<usize>,
+    ) -> Vec<Result<AcceptResponse, Status>> {
+        let responses = join_all(address_indexes.into_iter().map(|addr| {
+            let proposal = proposal.clone();
+            let addr = self.acceptor_addresses[addr].clone();
+            async move {
+                let channel = Channel::from_shared(format!("http://{}", addr))
+                    .unwrap()
+                    .timeout(std::time::Duration::from_secs(5))
+                    .connect()
+                    .await
+                    .unwrap();
+
+                let mut client = pb::paxos_client::PaxosClient::new(channel);
+
+                let request = pb::AcceptRequest {
+                    proposal: Some(proposal),
+                };
+
+                match client.accept(request).await {
+                    Ok(response) => {
+                        println!("response: {:?}", response);
+                        Ok(response.into_inner())
+                    }
+                    Err(e) => Err(e),
+                }
+            }
+        }))
+        .await;
+
+        responses
+    }
+}
+
+impl Drop for Paxos {
+    fn drop(&mut self) {
+        self.runtime.take().unwrap().shutdown_background();
     }
 }
