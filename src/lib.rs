@@ -5,8 +5,10 @@ mod tests;
 
 use futures::future::join_all;
 use pb::{AcceptResponse, PrepareResponse, Proposal};
+use rand::Rng;
 use tokio::runtime::{Builder, Runtime};
 use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 use tonic::transport::{Channel, Server};
 use tonic::Status;
 
@@ -111,6 +113,7 @@ impl Paxos {
 
     pub async fn run_paxos(&self, value: String) -> Proposal {
         let quorum = self.acceptor_num / 2 + 1;
+        let mut rng = rand::thread_rng();
 
         loop {
             let number = {
@@ -153,6 +156,7 @@ impl Paxos {
                 });
 
             if oudate {
+                sleep(Duration::from_millis(rng.gen_range(0..1000))).await;
                 continue;
             }
 
@@ -195,7 +199,7 @@ impl Paxos {
         let responses = join_all(self.acceptor_addresses.iter().map(|addr| async move {
             let channel = Channel::from_shared(format!("http://{}", addr))
                 .unwrap()
-                .timeout(std::time::Duration::from_secs(5))
+                .timeout(Duration::from_secs(5))
                 .connect()
                 .await
                 .unwrap();
@@ -228,7 +232,7 @@ impl Paxos {
             async move {
                 let channel = Channel::from_shared(format!("http://{}", addr))
                     .unwrap()
-                    .timeout(std::time::Duration::from_secs(5))
+                    .timeout(Duration::from_secs(5))
                     .connect()
                     .await
                     .unwrap();
