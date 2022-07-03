@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package paxos;
+
+message Proposal {
+  int64 Number = 1;
+  string Value = 2;
+}
+
+message PrepareRequest { int64 Number = 1; }
+
+message PrepareResponse {
+  int64 PromiseNumber = 1;
+  optional Proposal HighestNumberedProposal = 2;
+}
+
+message AcceptRequest { Proposal Proposal = 1; }
+
+message AcceptResponse { int64 PromiseNumber = 1; }
+
+// Paxos service.
+service Paxos {
+  rpc Prepare(PrepareRequest) returns (PrepareResponse) {}
+  rpc Accept(AcceptRequest) returns (AcceptResponse) {}
+}
