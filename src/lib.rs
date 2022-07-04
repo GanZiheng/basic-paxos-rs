@@ -37,7 +37,7 @@ impl pb::paxos_server::Paxos for Acceptor {
 
         let number = request.into_inner().number;
 
-        inner.promise_number = std::cmp::max(number, inner.promise_number);
+        inner.promise_number = std::cmp::max(inner.promise_number, number);
 
         let response = pb::PrepareResponse {
             promise_number: inner.promise_number,
@@ -86,7 +86,7 @@ impl Paxos {
 
         let acceptor_addresses = (0..acceptor_num)
             .map(|i| {
-                let addr_str = format!("[::1]:5005{}", i);
+                let addr_str = format!("[::1]:5{:04}", i);
                 let addr = addr_str.parse().unwrap();
                 let acceptor = Acceptor::default();
                 let svc = pb::paxos_server::PaxosServer::new(acceptor);
@@ -124,7 +124,7 @@ impl Paxos {
 
             let responses = self.phase1(number).await;
 
-            let mut oudate = false;
+            let mut outdate = false;
             let mut address_indexes = Vec::new();
             let mut highest_number = 0;
             let mut highest_numbered_proposal = None;
@@ -135,7 +135,7 @@ impl Paxos {
                 .for_each(|(index, response)| match response {
                     Ok(response) => {
                         if response.promise_number > number {
-                            oudate = true;
+                            outdate = true;
                             return;
                         }
                         assert!(response.promise_number == number);
@@ -155,12 +155,13 @@ impl Paxos {
                     Err(_) => (),
                 });
 
-            if oudate {
-                sleep(Duration::from_millis(rng.gen_range(0..1000))).await;
+            if outdate {
+                sleep(Duration::from_millis(rng.gen_range(3000..5000))).await;
                 continue;
             }
 
             if address_indexes.len() < quorum.try_into().unwrap() {
+                sleep(Duration::from_secs(5)).await;
                 continue;
             }
 
@@ -179,7 +180,7 @@ impl Paxos {
             responses.iter().for_each(|response| match response {
                 Ok(response) => {
                     if response.promise_number > number {
-                        oudate = true;
+                        outdate = true;
                         return;
                     }
                     assert!(response.promise_number == number);
@@ -187,7 +188,8 @@ impl Paxos {
                 Err(_) => (),
             });
 
-            if oudate {
+            if outdate {
+                sleep(Duration::from_millis(rng.gen_range(3000..5000))).await;
                 continue;
             }
 
@@ -196,7 +198,7 @@ impl Paxos {
     }
 
     async fn phase1(&self, number: i64) -> Vec<Result<PrepareResponse, Status>> {
-        let responses = join_all(self.acceptor_addresses.iter().map(|addr| async move {
+        join_all(self.acceptor_addresses.iter().map(|addr| async move {
             let channel = Channel::from_shared(format!("http://{}", addr))
                 .unwrap()
                 .timeout(Duration::from_secs(5))
@@ -216,9 +218,7 @@ impl Paxos {
                 Err(e) => Err(e),
             }
         }))
-        .await;
-
-        responses
+        .await
     }
 
     async fn phase2(
@@ -226,7 +226,7 @@ impl Paxos {
         proposal: Proposal,
         address_indexes: Vec<usize>,
     ) -> Vec<Result<AcceptResponse, Status>> {
-        let responses = join_all(address_indexes.into_iter().map(|addr| {
+        join_all(address_indexes.into_iter().map(|addr| {
             let proposal = proposal.clone();
             let addr = self.acceptor_addresses[addr].clone();
             async move {
@@ -252,9 +252,7 @@ impl Paxos {
                 }
             }
         }))
-        .await;
-
-        responses
+        .await
     }
 }
 
