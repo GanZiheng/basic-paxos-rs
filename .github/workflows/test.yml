@@ -49,4 +49,4 @@ jobs:
         run: cargo clippy --all-targets -- -D "warnings"
 
       - name: Run Tests 🚀
-        run: cargo test --test-threads 1
+        run: cargo test -- --test-threads 1
