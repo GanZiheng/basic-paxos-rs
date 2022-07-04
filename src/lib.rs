@@ -86,7 +86,12 @@ impl Paxos {
 
         let acceptor_addresses = (0..acceptor_num)
             .map(|i| {
-                let addr_str = format!("[::1]:5{:04}", i);
+                let mut port = 50000 + i;
+                while !port_scanner::local_port_available(port.try_into().unwrap()) {
+                    println!("Port {} is taken, trying next port", port);
+                    port += acceptor_num;
+                }
+                let addr_str = format!("127.0.0.1:{:05}", port);
                 let addr = addr_str.parse().unwrap();
                 let acceptor = Acceptor::default();
                 let svc = pb::paxos_server::PaxosServer::new(acceptor);

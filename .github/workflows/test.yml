@@ -1,0 +1,52 @@
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+name: Test
+
+jobs:
+  test:
+    name: Lint and Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel Previous Runs
+        uses: styfle/cancel-workflow-action@0.6.0
+        with:
+          access_token: ${{ github.token }}
+
+      - name: Checkout 🛎️
+        uses: actions/checkout@v2
+
+      - uses: actions/cache@v2
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            target
+          key: ${{ runner.os }}-cargo-test
+
+      - name: Setup Cargo Toolchain 🛎️
+        uses: actions-rs/toolchain@v1
+        with:
+          components: rustfmt, clippy
+          toolchain: stable
+          default: true
+
+      - name: Check Code Format 🔧
+        run: |
+          cargo fmt
+          git diff --quiet
+
+      - name: Lint The Code 🩹
+        run: cargo clippy --all-targets -- -D "warnings"
+
+      - name: Run Tests 🚀
+        run: cargo test --test-threads 1
