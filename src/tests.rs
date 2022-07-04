@@ -10,7 +10,7 @@ fn it_works() {
 
 #[tokio::test]
 async fn simple() {
-    let paxos = Paxos::new(11);
+    let paxos = Paxos::new(11).await;
 
     let result = paxos.run_paxos("hello".into()).await;
     assert_eq!(
@@ -24,7 +24,7 @@ async fn simple() {
 
 #[tokio::test]
 async fn concurrent_run() {
-    let paxos = Arc::new(Paxos::new(7));
+    let paxos = Arc::new(Paxos::new(7).await);
 
     let proposer_num = 100;
 

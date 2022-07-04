@@ -76,7 +76,7 @@ pub struct Paxos {
 }
 
 impl Paxos {
-    pub fn new(acceptor_num: u32) -> Self {
+    pub async fn new(acceptor_num: u32) -> Self {
         let runtime = Builder::new_multi_thread()
             .thread_name("paxos")
             .worker_threads(4)
@@ -107,6 +107,8 @@ impl Paxos {
                 addr_str
             })
             .collect();
+
+        sleep(Duration::from_secs(1)).await;
 
         Self {
             acceptor_num,
